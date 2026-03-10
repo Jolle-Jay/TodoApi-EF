@@ -1,41 +1,60 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+//hämtar connectionString från appsettings.json
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+// registrerar dbContext med MySql
+builder.Services.AddDbContext<TodoDb>(options =>
+options.UseMySql(connectionString, new MySqlServerVersion(new Version(9, 5, 0))));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+app.MapGet("/todos", async (TodoDb db) =>
+await db.Todos.ToListAsync());
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+app.MapPost("/todos", async (Todo todo, TodoDb db) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    db.Todos.Add(todo);
+    await db.SaveChangesAsync();
+    return Results.Ok(todo);
+});
 
-app.MapGet("/weatherforecast", () =>
+app.MapPut("/todos/{id}", async (int id, Todo updatedTodo, TodoDb db) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    var todo = await db.Todos.FindAsync(id);
+    if (todo == null) return Results.NotFound();
+    todo.Title = updatedTodo.Title;
+    todo.IsCompleted = updatedTodo.IsCompleted;
+    await db.SaveChangesAsync();
+    return Results.Ok(todo);
+
+});
+
+app.MapDelete("/todos/{id}", async (int id, TodoDb db) =>
+{
+    var todo = await db.Todos.FindAsync(id);
+    if (todo == null) return Results.NotFound();
+    db.Todos.Remove(todo);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+
+});
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+class Todo
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    public bool IsCompleted { get; set; }
 }
+
+//dbContext - kopplingen mellan C# och Databasen
+class TodoDb : DbContext
+{
+    public TodoDb(DbContextOptions<TodoDb> options) : base(options) { }
+    public DbSet<Todo> Todos { get; set; }
+};
